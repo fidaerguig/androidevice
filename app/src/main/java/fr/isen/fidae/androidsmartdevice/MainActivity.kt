@@ -40,7 +40,7 @@ fun MainScreen(onNavigateToScanActivity: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize() // Remplir toute la taille de l'écran
-            .background(Color(0xFF2196F3)) // Définir le fond bleu
+            .background(Color(0xC81EE2E9)) // Définir le fond bleu
             .padding(16.dp), // Ajouter des marges autour
         verticalArrangement = Arrangement.Center, // Centre verticalement
         horizontalAlignment = Alignment.CenterHorizontally // Centre horizontalement
@@ -78,9 +78,9 @@ fun MainScreen(onNavigateToScanActivity: () -> Unit) {
         Button(
             onClick = onNavigateToScanActivity, // L'action qui redirige vers ScanActivity
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = Color.White) // Couleur de fond du bouton
+            colors = ButtonDefaults.buttonColors(containerColor = Color.LightGray) // Couleur de fond du bouton
         ) {
-            Text(text = "Commencer", color = Color.Blue) // Texte bleu pour contraster avec le fond blanc
+            Text(text = "Commencer", color = Color.Black) // Texte bleu pour contraster avec le fond blanc
         }
     }
 }

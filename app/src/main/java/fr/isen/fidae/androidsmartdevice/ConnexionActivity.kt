@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.bluetooth.*
 import android.content.Context
 import android.os.Bundle
-import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -29,14 +28,21 @@ class ConnexionActivity : ComponentActivity() {
 
         setContent {
             val context = LocalContext.current
+
+            // États pour les LEDs et la connexion
             var led1State by remember { mutableStateOf(false) }
             var led2State by remember { mutableStateOf(false) }
             var led3State by remember { mutableStateOf(false) }
-            var button1Count by remember { mutableStateOf(0) }
-            var button3Count by remember { mutableStateOf(0) }
-            var isConnected by remember { mutableStateOf(false) } // Etat de la connexion
+            var isConnected by remember { mutableStateOf(false) }
 
-            // Quand l'appareil est sélectionné
+            // États pour les compteurs des boutons physiques
+            var button1Count by remember { mutableStateOf("") }
+            var button3Count by remember { mutableStateOf("") }
+
+            // État pour la gestion des notifications
+            var notificationsEnabledButton1 by remember { mutableStateOf(false) }
+            var notificationsEnabledButton3 by remember { mutableStateOf(false) }
+
             LaunchedEffect(device) {
                 device?.let { bluetoothDevice = it }
             }
@@ -49,21 +55,19 @@ class ConnexionActivity : ComponentActivity() {
                 button1Count = button1Count,
                 button3Count = button3Count,
                 onLedToggle = { ledId ->
-                    // Mise à jour de l'état des LEDs
                     when (ledId) {
                         1 -> led1State = !led1State
                         2 -> led2State = !led2State
                         3 -> led3State = !led3State
                     }
-                    // Envoi de la commande LED au périphérique STM32
-                    sendLedCommand(ledId, if (ledId == 1) led1State else if (ledId == 2) led2State else led3State)
+                    sendLedCommand(ledId, listOf(led1State, led2State, led3State)[ledId - 1])
                 },
                 onConnectClick = {
                     bluetoothDevice?.let { device ->
                         if (!isConnected) {
-                            connectToDevice(device, context, onButtonUpdate = { btn1, btn3 ->
-                                button1Count = btn1 // Mise à jour du compteur du bouton 1
-                                button3Count = btn3 // Mise à jour du compteur du bouton 3
+                            connectToDevice(device, context, { btn1, btn3 ->
+                                button1Count = btn1.toString()
+                                button3Count = btn3.toString()
                             })
                             isConnected = true
                         }
@@ -72,15 +76,23 @@ class ConnexionActivity : ComponentActivity() {
                 onDisconnectClick = {
                     bluetoothGatt?.close()
                     isConnected = false
-                    Toast.makeText(context, "Déconnexion de l'appareil", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Déconnecté de l'appareil", Toast.LENGTH_SHORT).show()
                 },
-                isConnected = isConnected // Etat de la connexion
+                isConnected = isConnected,
+                notificationsEnabledButton1 = notificationsEnabledButton1,
+                notificationsEnabledButton3 = notificationsEnabledButton3,
+                onNotificationsToggleButton1 = { notificationsEnabledButton1 = !notificationsEnabledButton1 },
+                onNotificationsToggleButton3 = { notificationsEnabledButton3 = !notificationsEnabledButton3 }
             )
         }
     }
 
     @SuppressLint("MissingPermission")
-    private fun connectToDevice(device: BluetoothDevice, context: Context, onButtonUpdate: (Int, Int) -> Unit) {
+    private fun connectToDevice(
+        device: BluetoothDevice,
+        context: Context,
+        updateCounts: (Int, Int) -> Unit
+    ) {
         val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
 
         if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) {
@@ -90,13 +102,11 @@ class ConnexionActivity : ComponentActivity() {
 
         bluetoothGatt = device.connectGatt(this, true, object : BluetoothGattCallback() {
             override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
-                if (newState == BluetoothProfile.STATE_CONNECTED) {
-                    runOnUiThread {
+                runOnUiThread {
+                    if (newState == BluetoothProfile.STATE_CONNECTED) {
                         Toast.makeText(context, "Connecté à ${device.name}", Toast.LENGTH_SHORT).show()
-                    }
-                    gatt?.discoverServices()
-                } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                    runOnUiThread {
+                        gatt?.discoverServices()
+                    } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                         Toast.makeText(context, "Déconnecté", Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -104,25 +114,47 @@ class ConnexionActivity : ComponentActivity() {
 
             override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
                 if (status == BluetoothGatt.GATT_SUCCESS) {
-                    // Services et caractéristiques découverts
-                    val service = gatt?.services?.getOrNull(2) // On sélectionne le service 3
-                    service?.let { s ->
-                        val characteristic = s.characteristics.getOrNull(1) // On sélectionne la caractéristique 2
-                        characteristic?.let {
-                            gatt.setCharacteristicNotification(it, true) // Activer les notifications pour cette caractéristique
+                    // Service 3, Caractéristique 2 (Bouton principal)
+                    val service3 = gatt?.services?.getOrNull(2)
+                    service3?.characteristics?.getOrNull(1)?.let { characteristic ->
+                        gatt.setCharacteristicNotification(characteristic, true)
+                        characteristic.descriptors?.getOrNull(0)?.let { descriptor ->
+                            descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                            gatt.writeDescriptor(descriptor)
+                        }
+                    }
+
+                    // Service 2, Caractéristique 1 (Troisième bouton)
+                    val service2 = gatt?.services?.getOrNull(1)
+                    service2?.characteristics?.getOrNull(0)?.let { characteristic ->
+                        gatt.setCharacteristicNotification(characteristic, true)
+                        characteristic.descriptors?.getOrNull(0)?.let { descriptor ->
+                            descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                            gatt.writeDescriptor(descriptor)
                         }
                     }
                 }
             }
 
+            override fun onCharacteristicChanged(
+                gatt: BluetoothGatt,
+                characteristic: BluetoothGattCharacteristic,
+                value: ByteArray
+            ) {
+                super.onCharacteristicChanged(gatt, characteristic, value)
+            }
+
+            @Deprecated("Deprecated in Java")
             override fun onCharacteristicChanged(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic?) {
+                super.onCharacteristicChanged(gatt, characteristic)
                 characteristic?.let {
-                    Log.d("Bluetooth", "Changement caractéristique : ${it.uuid}")
                     if (it.value != null && it.value.size >= 2) {
-                        val btn1Count = it.value[0].toInt()  // Nombre de clics du bouton 1
-                        val btn3Count = it.value[1].toInt()  // Nombre de clics du bouton 3
+                        // Lier les états des boutons
+                        val btn1State = it.value[1].toInt() // Bouton 1
+                        val btn3State = it.value[0].toInt() // Bouton 3
+
                         runOnUiThread {
-                            onButtonUpdate(btn1Count, btn3Count) // Mise à jour des compteurs
+                            updateCounts(btn1State, btn3State) // Mettre à jour les compteurs avec les états des boutons
                         }
                     }
                 }
@@ -133,15 +165,11 @@ class ConnexionActivity : ComponentActivity() {
     @SuppressLint("MissingPermission")
     private fun sendLedCommand(ledId: Int, state: Boolean) {
         bluetoothGatt?.let { gatt ->
-            // Trouver le service correspondant aux LEDs
-            val service = gatt.services.getOrNull(2) // Supposez que le service des LEDs est au 2ème index
-            service?.let { s ->
-                val characteristic = s.characteristics.getOrNull(0) // Supposez que la caractéristique est au 0ème index
-                characteristic?.let {
-                    val ledCommand = if (state) ledId.toByte() else 0x00 // Envoi de la commande LED
-                    it.value = byteArrayOf(ledCommand)
-                    gatt.writeCharacteristic(it)
-                }
+            val service = gatt.services.getOrNull(2)
+            service?.characteristics?.getOrNull(0)?.let {
+                val ledCommand = if (state) ledId.toByte() else 0x00
+                it.value = byteArrayOf(ledCommand)
+                gatt.writeCharacteristic(it)
             }
         }
     }
@@ -159,18 +187,24 @@ fun DeviceDetailsScreen(
     led1State: Boolean,
     led2State: Boolean,
     led3State: Boolean,
-    button1Count: Int,
-    button3Count: Int,
+    button1Count: String,
+    button3Count: String,
     onLedToggle: (Int) -> Unit,
     onConnectClick: () -> Unit,
     onDisconnectClick: () -> Unit,
-    isConnected: Boolean
+    isConnected: Boolean,
+    notificationsEnabledButton1: Boolean,
+    notificationsEnabledButton3: Boolean,
+    onNotificationsToggleButton1: () -> Unit,
+    onNotificationsToggleButton3: () -> Unit
 ) {
-    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        containerColor = Color(0xC81EE2E9) // Couleur de fond pour Scaffold
+    ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFF2196F3))
                 .padding(innerPadding)
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -179,7 +213,7 @@ fun DeviceDetailsScreen(
             Spacer(modifier = Modifier.height(16.dp))
             Text(text = "Nom de l'appareil : $deviceName", style = MaterialTheme.typography.bodyLarge)
 
-            // Connexion à l'appareil
+            // Bouton de connexion/déconnexion
             Button(
                 onClick = {
                     if (isConnected) {
@@ -190,36 +224,90 @@ fun DeviceDetailsScreen(
                 },
                 modifier = Modifier
                     .padding(vertical = 8.dp)
-                    .fillMaxWidth()
+                    .fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.Yellow, // Jaune pour les boutons
+                    contentColor = Color.Black
+                )
             ) {
-                Text(text = if (isConnected) "Déconnexion " else "Connexion à l'appareil")
+                Text(text = if (isConnected) "Déconnexion" else "Connexion à l'appareil")
             }
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // LED Buttons
+            // Boutons LED
             LedButton(ledId = 1, isOn = led1State, onLedToggle = onLedToggle)
             LedButton(ledId = 2, isOn = led2State, onLedToggle = onLedToggle)
             LedButton(ledId = 3, isOn = led3State, onLedToggle = onLedToggle)
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Button Counters
-            Text(text = "Bouton un  : $button1Count clics")
-            Text(text = "Bouton trois : $button3Count clics")
+            // Gestion des notifications
+            if (notificationsEnabledButton1) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                ) {
+                    Text(text = "Bouton 1 : $button1Count clics")
+                    Button(
+                        onClick = { onNotificationsToggleButton1() },
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFE6EE00),
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text("Désactiver Notification Bouton 1")
+                    }
+                }
+            }
+
+            if (notificationsEnabledButton3) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                ) {
+                    Text(text = "Bouton 3 : $button3Count clics")
+                    Button(
+                        onClick = { onNotificationsToggleButton3() },
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFE6EE00),
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text("Désactiver Notification Bouton 3")
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Switch pour activer/désactiver les notifications
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(text = "Notifications Bouton 1")
+                Switch(checked = notificationsEnabledButton1, onCheckedChange = { onNotificationsToggleButton1() })
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(text = "Notifications Bouton 3")
+                Switch(checked = notificationsEnabledButton3, onCheckedChange = { onNotificationsToggleButton3() })
+            }
         }
     }
 }
+
 
 @Composable
 fun LedButton(ledId: Int, isOn: Boolean, onLedToggle: (Int) -> Unit) {
     Button(
         onClick = { onLedToggle(ledId) },
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         colors = ButtonDefaults.buttonColors(
-            containerColor = if (isOn) Color.Green else Color.Gray
-        )
+            containerColor = if (isOn) Color.Green else Color.LightGray
+        ),
+        modifier = Modifier
+            .padding(8.dp)
+            .fillMaxWidth()
     ) {
-        Text(text = "LED $ledId ${if (isOn) "ON" else "OFF"}")
+        Text(text = "LED $ledId - ${if (isOn) "ALLUME" else "ETEINT"}")
     }
 }

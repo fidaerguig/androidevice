@@ -191,7 +191,7 @@ fun ScanScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFF2196F3))
+                .background(Color(0xC81EE2E9))
                 .padding(innerPadding)
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -201,7 +201,7 @@ fun ScanScreen(
             Button(
                 onClick = onScanClick,
                 modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)
+                colors = ButtonDefaults.buttonColors(containerColor = Color.LightGray, contentColor = Color.Black)
             ) {
                 Text("Scanner")
             }
@@ -210,7 +210,7 @@ fun ScanScreen(
                 Button(
                     onClick = onStopScanClick,
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.LightGray, contentColor = Color.Black)
                 ) {
                     Text("Arrêter")
                 }
@@ -250,7 +250,7 @@ fun DeviceButton(device: BluetoothDevice, context: Context) {
                 context.startActivity(intent)
             },
             modifier = Modifier.weight(1f),
-            colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)
+            colors = ButtonDefaults.buttonColors(containerColor = Color.LightGray, contentColor = Color.Black)
         ) {
             Text(text = device.name ?: "Appareil inconnu")
         }
